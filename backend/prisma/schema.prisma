@@ -1,0 +1,478 @@
+// ==============================================================
+// PRISMA SCHEMA - LIBRARY MANAGEMENT SYSTEM (LMS)
+// ==============================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --------------------------------------------------------------
+// ENUMS
+// --------------------------------------------------------------
+
+enum UserStatus {
+  PENDING_APPROVAL // Độc giả mới đăng ký online, chờ duyệt
+  ACTIVE           // Tài khoản đang hoạt động bình thường
+  REJECTED         // Bị từ chối duyệt
+  LOCKED           // Bị quản trị viên khóa
+}
+
+enum CopyStatus {
+  AVAILABLE   // Sẵn sàng trên giá sách để mượn
+  BORROWED    // Đang được độc giả mượn
+  RESERVED    // Đang giữ chỗ tại quầy cho người đặt trước (tối đa 48h)
+  MAINTENANCE // Đang bảo trì, đóng lại bìa, phục chế
+  LOST        // Đã mất
+}
+
+enum CopyCondition {
+  NEW     // Mới 100%
+  GOOD    // Tốt, nguyên vẹn
+  FAIR    // Khá, có dấu hiệu đã sử dụng
+  POOR    // Cũ, rách nhẹ
+  DAMAGED // Hư hỏng nặng, cần bồi thường
+}
+
+enum BorrowingStatus {
+  BORROWING // Phiếu mượn đang diễn ra
+  COMPLETED // Tất cả các cuốn sách trong phiếu đã được trả
+  OVERDUE   // Có ít nhất 1 cuốn sách trong phiếu bị quá hạn
+}
+
+enum BorrowingDetailStatus {
+  BORROWED // Đang mượn
+  RETURNED // Đã trả về thư viện
+  LOST     // Độc giả báo mất sách
+  DAMAGED  // Độc giả làm hỏng sách
+}
+
+enum ReservationStatus {
+  WAITING   // Đang xếp hàng chờ sách có sẵn (FIFO)
+  READY     // Sách đã về, đang giữ tại quầy (bắt đầu tính 48h)
+  COMPLETED // Độc giả đã đến nhận và chuyển thành phiếu mượn
+  CANCELLED // Độc giả chủ động hủy
+  EXPIRED   // Quá 48h độc giả không đến nhận
+}
+
+enum FineStatus {
+  UNPAID // Chưa nộp phạt
+  PAID   // Đã nộp tiền mặt tại quầy thư viện
+  WAIVED // Được thủ thư/admin miễn giảm
+}
+
+enum FineReason {
+  OVERDUE      // Trả sách quá hạn
+  DAMAGED_BOOK // Làm rách, bẩn, hư hỏng sách
+  LOST_BOOK    // Làm mất sách
+  OTHER        // Lý do khác
+}
+
+enum NotificationType {
+  ACCOUNT_APPROVED // Thông báo duyệt tài khoản độc giả
+  DUE_REMINDER     // Nhắc nhở sắp đến hạn trả sách (trước 2 ngày)
+  OVERDUE_ALERT    // Cảnh báo sách đã quá hạn
+  HOLD_READY       // Sách đặt trước đã về quầy (giữ trong 48h)
+  FINE_INCURRED    // Thông báo phát sinh khoản phạt
+  SYSTEM           // Thông báo chung từ hệ thống
+}
+
+// --------------------------------------------------------------
+// 1. PHÂN HỆ TÀI KHOẢN, PHÂN QUYỀN (RBAC) & PHIÊN ĐĂNG NHẬP
+// --------------------------------------------------------------
+
+model User {
+  id               String     @id @default(uuid())
+  email            String     @unique
+  password_hash    String
+  full_name        String
+  phone            String?
+  card_code        String?    @unique // Mã thẻ độc giả: LIB-RD-YYYY-XXXX
+  address          String?
+  avatar_url       String?
+  status           UserStatus @default(PENDING_APPROVAL)
+  token_version    Int        @default(1) // Quản lý vô hiệu hóa phiên toàn cục
+
+  // Phê duyệt tài khoản độc giả (Self-relation)
+  approved_by_id   String?
+  approved_by      User?      @relation("UserApprovals", fields: [approved_by_id], references: [id], onDelete: SetNull)
+  approved_users   User[]     @relation("UserApprovals")
+  approved_at      DateTime?
+  rejection_reason String?
+
+  created_at       DateTime   @default(now())
+  updated_at       DateTime   @updatedAt
+  deleted_at       DateTime?
+
+  // Quan hệ
+  user_roles              UserRole[]
+  refresh_tokens          RefreshToken[]
+  borrowings_as_reader    Borrowing[]     @relation("ReaderBorrowings")
+  borrowings_as_librarian Borrowing[]     @relation("LibrarianBorrowings")
+  reservations            Reservation[]
+  fines_as_reader         Fine[]          @relation("ReaderFines")
+  fines_as_collector      Fine[]          @relation("CollectorFines")
+  notifications           Notification[]
+  audit_logs              AuditLog[]
+
+  @@index([status])
+  @@index([token_version])
+  @@map("users")
+}
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique // ADMIN, LIBRARIAN, READER
+  name        String   // Quản trị viên, Thủ thư, Độc giả
+  description String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  user_roles       UserRole[]
+  role_permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique // Ví dụ: books:create, users:approve
+  name        String
+  module      String   // CATALOG, USERS, CIRCULATION, FINES, SETTINGS
+  description String?
+  created_at  DateTime @default(now())
+
+  role_permissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  id         Int      @id @default(autoincrement())
+  user_id    String
+  role_id    Int
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, role_id])
+  @@index([role_id])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id            Int      @id @default(autoincrement())
+  role_id       Int
+  permission_id Int
+  created_at    DateTime @default(now())
+
+  role       Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+
+  @@unique([role_id, permission_id])
+  @@index([permission_id])
+  @@map("role_permissions")
+}
+
+// Bảng cấp số thứ tự mã thẻ độc giả nguyên tử, chống tương tranh tuyệt đối
+model CardCounter {
+  year     Int @id
+  last_seq Int @default(0)
+
+  @@map("card_counter")
+}
+
+// Bảng lưu phiên thiết bị và Hash của Refresh Token (id = sid)
+model RefreshToken {
+  id           String    @id @default(uuid()) // Đóng vai trò là session_id (sid)
+  user_id      String
+  token_hash   String    @unique // Lưu chuỗi băm SHA-256
+  family_id    String    // Quản lý họ token phục vụ phát hiện token bị đánh cắp (Reuse Detection)
+  is_revoked   Boolean   @default(false) // Thu hồi riêng từng thiết bị khi đăng xuất
+  revoked_at   DateTime? // Thời điểm thu hồi phiên
+  last_used_at DateTime? // Thời điểm token được sử dụng lần cuối để refresh
+  expires_at   DateTime
+  ip_address   String?
+  user_agent   String?
+  created_at   DateTime  @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, is_revoked, expires_at])
+  @@index([family_id])
+  @@map("refresh_tokens")
+}
+
+// --------------------------------------------------------------
+// 2. PHÂN HỆ DANH MỤC TRI THỨC (CATALOG: SÁCH, TÁC GIẢ, NXB)
+// --------------------------------------------------------------
+
+model Category {
+  id          Int      @id @default(autoincrement())
+  name        String
+  slug        String   @unique
+  description String?
+  parent_id   Int?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  // Phân cấp cây thể loại (Self-relation)
+  parent          Category?      @relation("CategoryHierarchy", fields: [parent_id], references: [id], onDelete: SetNull)
+  children        Category[]     @relation("CategoryHierarchy")
+  book_categories BookCategory[]
+
+  @@map("categories")
+}
+
+model Author {
+  id         Int       @id @default(autoincrement())
+  name       String
+  bio        String?   @db.Text
+  birth_date DateTime?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  book_authors BookAuthor[]
+
+  @@map("authors")
+}
+
+model Publisher {
+  id            Int      @id @default(autoincrement())
+  name          String
+  address       String?
+  contact_email String?
+  phone         String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  books Book[]
+
+  @@map("publishers")
+}
+
+// Đầu sách trừu tượng (Lưu thông tin tác phẩm, ISBN, metadata)
+model Book {
+  id               String    @id @default(uuid())
+  isbn             String?   @unique // Nullable để hỗ trợ sách cổ / sách không có mã ISBN
+  title            String
+  summary          String?   @db.Text
+  publisher_id     Int?
+  publication_year Int?
+  edition          String?
+  language         String    @default("vi")
+  page_count       Int?
+  cover_image_url  String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  deleted_at       DateTime?
+
+  publisher       Publisher?     @relation(fields: [publisher_id], references: [id], onDelete: SetNull)
+  book_authors    BookAuthor[]
+  book_categories BookCategory[]
+  book_copies     BookCopy[]
+  reservations    Reservation[]
+
+  @@index([title])
+  @@index([publisher_id])
+  @@map("books")
+}
+
+// Bảng nối Book và Author (Quan hệ n-n)
+model BookAuthor {
+  book_id   String
+  author_id Int
+
+  book   Book   @relation(fields: [book_id], references: [id], onDelete: Cascade)
+  author Author @relation(fields: [author_id], references: [id], onDelete: Cascade)
+
+  @@id([book_id, author_id])
+  @@index([author_id])
+  @@map("book_authors")
+}
+
+// Bảng nối Book và Category (Quan hệ n-n)
+model BookCategory {
+  book_id     String
+  category_id Int
+
+  book     Book     @relation(fields: [book_id], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@id([book_id, category_id])
+  @@index([category_id])
+  @@map("book_categories")
+}
+
+// Bản sách vật lý (Từng cuốn sách cụ thể có Barcode riêng, vị trí kệ, tình trạng)
+model BookCopy {
+  id             String        @id @default(uuid())
+  book_id        String
+  barcode        String        @unique // Quét bằng máy đọc mã vạch USB
+  status         CopyStatus    @default(AVAILABLE)
+  condition      CopyCondition @default(NEW)
+  shelf_location String?       // Ví dụ: Kệ A1 - Tầng 2
+  price          Decimal       @default(0.0) @db.Decimal(12, 2) // Giá bìa phục vụ bồi thường
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @updatedAt
+
+  book                  Book              @relation(fields: [book_id], references: [id], onDelete: Restrict)
+  borrowing_details     BorrowingDetail[]
+  assigned_reservations Reservation[]
+
+  @@index([book_id, status])
+  @@map("book_copies")
+}
+
+// --------------------------------------------------------------
+// 3. PHÂN HỆ LƯU THÔNG (MƯỢN, TRẢ & CHI TIẾT)
+// --------------------------------------------------------------
+
+model Borrowing {
+  id           String          @id @default(uuid())
+  reader_id    String
+  librarian_id String
+  borrow_date  DateTime        @default(now())
+  status       BorrowingStatus @default(BORROWING)
+  notes        String?         @db.Text
+  created_at   DateTime        @default(now())
+  updated_at   DateTime        @updatedAt
+
+  reader            User              @relation("ReaderBorrowings", fields: [reader_id], references: [id], onDelete: Restrict)
+  librarian         User              @relation("LibrarianBorrowings", fields: [librarian_id], references: [id], onDelete: Restrict)
+  borrowing_details BorrowingDetail[]
+
+  @@index([reader_id])
+  @@index([librarian_id])
+  @@index([status])
+  @@map("borrowings")
+}
+
+model BorrowingDetail {
+  id               String                @id @default(uuid())
+  borrowing_id     String
+  book_copy_id     String
+  due_date         DateTime              // Hạn trả (mặc định mượn +14 ngày)
+  returned_date    DateTime?             // Ngày thực tế mang trả sách
+  condition_before CopyCondition         @default(GOOD)
+  condition_after  CopyCondition?
+  status           BorrowingDetailStatus @default(BORROWED)
+  renewal_count    Int                   @default(0) // Số lần đã gia hạn (SQL Check: 0 <= renewal_count <= 1)
+
+  borrowing Borrowing @relation(fields: [borrowing_id], references: [id], onDelete: Cascade)
+  book_copy BookCopy  @relation(fields: [book_copy_id], references: [id], onDelete: Restrict)
+  fines     Fine[]
+
+  @@index([borrowing_id])
+  @@index([book_copy_id])
+  @@index([status, due_date])
+  @@map("borrowing_details")
+}
+
+// --------------------------------------------------------------
+// 4. PHÂN HỆ ĐẶT TRƯỚC SÁCH (RESERVATION / HOLD QUEUE)
+// --------------------------------------------------------------
+
+model Reservation {
+  id              String            @id @default(uuid())
+  reader_id       String
+  book_id         String
+  book_copy_id    String?           // Gán bản sách khi có sách trả về quầy
+  queue_position  Int               // Thứ tự xếp hàng FIFO
+  reserved_at     DateTime          @default(now())
+  hold_starts_at  DateTime?         // Bắt đầu tính giữ chỗ khi sách về
+  hold_expires_at DateTime?         // Hết hạn giữ chỗ sau 48h
+  status          ReservationStatus @default(WAITING)
+  created_at      DateTime          @default(now())
+  updated_at      DateTime          @updatedAt
+
+  reader    User      @relation(fields: [reader_id], references: [id], onDelete: Cascade)
+  book      Book      @relation(fields: [book_id], references: [id], onDelete: Restrict)
+  book_copy BookCopy? @relation(fields: [book_copy_id], references: [id], onDelete: SetNull)
+
+  @@index([book_id, status, queue_position])
+  @@index([reader_id])
+  @@index([hold_expires_at, status])
+  @@map("reservations")
+}
+
+// --------------------------------------------------------------
+// 5. PHÂN HỆ TIỀN PHẠT & THU TIỀN MẶT TẠI QUẦY
+// --------------------------------------------------------------
+
+model Fine {
+  id                  String     @id @default(uuid())
+  reader_id           String
+  borrowing_detail_id String?
+  amount              Decimal    @db.Decimal(12, 2) // SQL Check: amount >= 0
+  reason              FineReason @default(OVERDUE)
+  status              FineStatus @default(UNPAID)
+  payment_method      String     @default("CASH") // Tiền mặt tại quầy
+  receipt_number      String?    @unique // Mã biên lai: REC-YYYYMMDD-XXXXX
+  collected_by_id     String?    // Thủ thư thu tiền mặt
+  paid_at             DateTime?
+  waiver_reason       String?    @db.Text
+  notes               String?    @db.Text
+  created_at          DateTime   @default(now())
+
+  reader           User             @relation("ReaderFines", fields: [reader_id], references: [id], onDelete: Restrict)
+  borrowing_detail BorrowingDetail? @relation(fields: [borrowing_detail_id], references: [id], onDelete: SetNull)
+  collector        User?            @relation("CollectorFines", fields: [collected_by_id], references: [id], onDelete: SetNull)
+
+  @@index([reader_id, status])
+  @@map("fines")
+}
+
+// --------------------------------------------------------------
+// 6. THÔNG BÁO, CẤU HÌNH HỆ THỐNG & NHẬT KÝ KIỂM TOÁN
+// --------------------------------------------------------------
+
+model Notification {
+  id         String           @id @default(uuid())
+  user_id    String
+  title      String
+  message    String           @db.Text
+  type       NotificationType @default(SYSTEM)
+  link_url   String?
+  is_read    Boolean          @default(false)
+  created_at DateTime         @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, is_read, created_at])
+  @@map("notifications")
+}
+
+model SystemSetting {
+  id            Int      @id @default(autoincrement())
+  setting_key   String   @unique
+  setting_value String   @db.Text
+  description   String?
+  updated_at    DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  user_id     String?
+  action      String   // LOGIN, LOGOUT, APPROVE_READER, REJECT_READER, CHECKOUT, CHECKIN, COLLECT_FINE...
+  entity_name String
+  entity_id   String
+  old_values  Json?
+  new_values  Json?
+  ip_address  String?
+  user_agent  String?
+  created_at  DateTime @default(now())
+
+  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at])
+  @@index([entity_name, entity_id])
+  @@map("audit_logs")
+}
