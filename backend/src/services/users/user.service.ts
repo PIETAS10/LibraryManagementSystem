@@ -273,7 +273,7 @@ export const approveReader = async (
 
     const cardCode = await generateReaderCardCode(tx);
 
-    return tx.user.update({
+    const approvedReader = await tx.user.update({
       where: { id },
       data: {
         status: 'ACTIVE',
@@ -284,6 +284,18 @@ export const approveReader = async (
       },
       select: readerSelect,
     });
+
+    await tx.notification.create({
+      data: {
+        user_id: id,
+        title: 'Tài khoản đã được duyệt',
+        message: `Tài khoản của bạn đã được duyệt. Mã thẻ độc giả: ${cardCode}.`,
+        type: 'ACCOUNT_APPROVED',
+        link_url: '/my-borrowed-books',
+      },
+    });
+
+    return approvedReader;
   });
 };
 
@@ -317,7 +329,7 @@ export const rejectReader = async (
       );
     }
 
-    return tx.user.update({
+    const rejectedReader = await tx.user.update({
       where: { id },
       data: {
         status: 'REJECTED',
@@ -327,6 +339,17 @@ export const rejectReader = async (
       },
       select: readerSelect,
     });
+
+    await tx.notification.create({
+      data: {
+        user_id: id,
+        title: 'Yêu cầu đăng ký chưa được duyệt',
+        message: `Yêu cầu đăng ký của bạn chưa được duyệt. Lý do: ${reason}`,
+        type: 'SYSTEM',
+      },
+    });
+
+    return rejectedReader;
   });
 };
 

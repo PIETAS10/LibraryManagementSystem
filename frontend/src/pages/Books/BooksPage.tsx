@@ -50,7 +50,15 @@ const initialForm = {
   price: '0',
 };
 
-const BooksPage: React.FC = () => {
+interface BooksPageProps {
+  openCreateOnMount?: boolean;
+  onCreateOpened?: () => void;
+}
+
+const BooksPage: React.FC<BooksPageProps> = ({
+  openCreateOnMount = false,
+  onCreateOpened,
+}) => {
   const { accessToken, hasPermission } = useAuth();
 
   const [books, setBooks] = useState<Book[]>([]);
@@ -172,6 +180,12 @@ const BooksPage: React.FC = () => {
     setShowForm(true);
     loadOptions().catch(() => {});
   };
+
+  useEffect(() => {
+    if (!openCreateOnMount) return;
+    openCreateForm();
+    onCreateOpened?.();
+  }, [openCreateOnMount]);
 
   const openEditForm = async (bookId: string) => {
     if (!accessToken) {

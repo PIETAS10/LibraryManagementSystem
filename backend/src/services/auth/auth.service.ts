@@ -422,6 +422,33 @@ export const registerReader = async (data: {
         },
       });
 
+      const staff = await tx.user.findMany({
+        where: {
+          deleted_at: null,
+          status: 'ACTIVE',
+          user_roles: {
+            some: {
+              role: {
+                code: { in: ['ADMIN', 'LIBRARIAN'] },
+              },
+            },
+          },
+        },
+        select: { id: true },
+      });
+
+      if (staff.length > 0) {
+        await tx.notification.createMany({
+          data: staff.map(({ id }) => ({
+            user_id: id,
+            title: 'Có yêu cầu đăng ký mới',
+            message: `${newUser.full_name} vừa đăng ký tài khoản độc giả và đang chờ duyệt.`,
+            type: 'SYSTEM',
+            link_url: '/readers',
+          })),
+        });
+      }
+
       return newUser;
     });
 

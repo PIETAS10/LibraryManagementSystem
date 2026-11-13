@@ -2,6 +2,12 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
+type DashboardAction = 'createBook' | 'createReader';
+
+interface DashboardProps {
+  onNavigate: (page: string, action?: DashboardAction) => void;
+}
+
 const API_URL =
   import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -36,8 +42,10 @@ const formatDate = (date: string): string => {
   return new Date(date).toLocaleDateString('vi-VN');
 };
 
-const Dashboard: React.FC = () => {
-  const { accessToken } = useAuth();
+const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
+  const { accessToken, hasPermission } = useAuth();
+  const canCreateBook = hasPermission('books:create');
+  const canCreateReader = hasPermission('users:create');
 
   const [statistics, setStatistics] = useState<DashboardStatistics>({
     total_books: 0,
@@ -124,6 +132,7 @@ const Dashboard: React.FC = () => {
       detail: 'Đầu sách trong hệ thống',
       icon: 'bi bi-book',
       color: 'red',
+      page: 'Quản lý sách',
     },
     {
       title: 'Sách có sẵn',
@@ -131,6 +140,7 @@ const Dashboard: React.FC = () => {
       detail: 'Có thể cho mượn',
       icon: 'bi bi-bookmark-check',
       color: 'green',
+      page: 'Quản lý bản sách',
     },
     {
       title: 'Đang được mượn',
@@ -138,6 +148,7 @@ const Dashboard: React.FC = () => {
       detail: 'Lượt mượn hiện tại',
       icon: 'bi bi-journal-arrow-up',
       color: 'orange',
+      page: 'Theo dõi sách đang mượn',
     },
     {
       title: 'Sách quá hạn',
@@ -145,6 +156,7 @@ const Dashboard: React.FC = () => {
       detail: 'Cần xử lý',
       icon: 'bi bi-clock-history',
       color: 'blue',
+      page: 'Theo dõi sách đang mượn',
     },
   ];
 
@@ -175,7 +187,13 @@ const Dashboard: React.FC = () => {
 
       <section className="statistics-grid">
         {statisticCards.map((item) => (
-          <div className="stat-card" key={item.title}>
+          <button
+            className="stat-card stat-card-button"
+            key={item.title}
+            type="button"
+            onClick={() => onNavigate(item.page)}
+            aria-label={`Mở ${item.title}`}
+          >
             <div className="stat-top">
               <span>{item.title}</span>
               <div className={`stat-icon ${item.color}`}>
@@ -187,7 +205,7 @@ const Dashboard: React.FC = () => {
               {loading ? '...' : numberFormatter.format(item.value)}
             </h3>
             <p>{item.detail}</p>
-          </div>
+          </button>
         ))}
       </section>
 
@@ -199,7 +217,11 @@ const Dashboard: React.FC = () => {
               <p>Theo dõi các giao dịch mượn và trả sách</p>
             </div>
 
-            <button className="view-all-btn" type="button">
+            <button
+              className="view-all-btn"
+              type="button"
+              onClick={() => onNavigate('Theo dõi sách đang mượn')}
+            >
               Xem tất cả <i className="bi bi-arrow-right"></i>
             </button>
           </div>
@@ -263,18 +285,28 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          <button className="quick-item" type="button">
-            <div className="quick-icon">
-              <i className="bi bi-plus-lg"></i>
-            </div>
-            <div>
-              <strong>Thêm đầu sách</strong>
-              <span>Nhập thông tin sách mới</span>
-            </div>
-            <i className="bi bi-chevron-right"></i>
-          </button>
+          {canCreateBook && (
+            <button
+              className="quick-item"
+              type="button"
+              onClick={() => onNavigate('Quản lý sách', 'createBook')}
+            >
+              <div className="quick-icon">
+                <i className="bi bi-plus-lg"></i>
+              </div>
+              <div>
+                <strong>Thêm đầu sách</strong>
+                <span>Nhập thông tin sách mới</span>
+              </div>
+              <i className="bi bi-chevron-right"></i>
+            </button>
+          )}
 
-          <button className="quick-item" type="button">
+          <button
+            className="quick-item"
+            type="button"
+            onClick={() => onNavigate('Mượn và trả sách')}
+          >
             <div className="quick-icon">
               <i className="bi bi-arrow-left-right"></i>
             </div>
@@ -285,16 +317,22 @@ const Dashboard: React.FC = () => {
             <i className="bi bi-chevron-right"></i>
           </button>
 
-          <button className="quick-item" type="button">
-            <div className="quick-icon">
-              <i className="bi bi-person-plus"></i>
-            </div>
-            <div>
-              <strong>Thêm độc giả</strong>
-              <span>Đăng ký độc giả mới</span>
-            </div>
-            <i className="bi bi-chevron-right"></i>
-          </button>
+          {canCreateReader && (
+            <button
+              className="quick-item"
+              type="button"
+              onClick={() => onNavigate('Độc giả', 'createReader')}
+            >
+              <div className="quick-icon">
+                <i className="bi bi-person-plus"></i>
+              </div>
+              <div>
+                <strong>Thêm độc giả</strong>
+                <span>Đăng ký độc giả mới</span>
+              </div>
+              <i className="bi bi-chevron-right"></i>
+            </button>
+          )}
         </div>
       </section>
 

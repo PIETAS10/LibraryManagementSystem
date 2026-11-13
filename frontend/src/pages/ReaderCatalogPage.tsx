@@ -202,13 +202,12 @@ const ReaderCatalogPage: React.FC = () => {
                 {book.cover_image_url ? (
                   <img
                     src={book.cover_image_url}
-                    className="card-img-top"
+                    className="card-img-top reader-book-cover"
                     alt={book.title}
                     style={{
                       height: "220px",
                       objectFit: "contain",
                       padding: "12px",
-                      backgroundColor: "#f8f9fa",
                     }}
                   />
                 ) : (
@@ -372,11 +371,10 @@ const ReaderCatalogPage: React.FC = () => {
                       <img
                         src={selectedBook.cover_image_url}
                         alt={selectedBook.title}
-                        className="img-fluid rounded border w-100"
+                        className="img-fluid rounded border w-100 reader-book-cover"
                         style={{
                           maxHeight: "350px",
                           objectFit: "contain",
-                          backgroundColor: "#f8f9fa",
                         }}
                       />
                     ) : (

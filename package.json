@@ -1,0 +1,8 @@
+{
+  "name": "library-management-system",
+  "private": true,
+  "scripts": {
+    "setup:local": "node scripts/setup-local.mjs",
+    "dev": "node scripts/start-local.mjs"
+  }
+}

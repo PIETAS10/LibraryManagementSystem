@@ -1,6 +1,6 @@
 -- ==============================================================
--- CÁC RÀNG BUỘC NGHIỆP VỤ BỔ SUNG TRÊN POSTGRESQL (CHUẨN HÓA)
--- Sẽ được tích hợp vào Prisma Migration khi bạn phê duyệt
+-- CÁC RÀNG BUỘC NGHIỆP VỤ BỔ SUNG TRÊN POSTGRESQL
+-- Script setup local áp dụng file này sau khi chạy Prisma migrations.
 -- ==============================================================
 
 -- 1. Chống một độc giả đặt nhiều lượt WAITING hoặc READY cho cùng một đầu sách
@@ -21,37 +21,65 @@ ON "borrowing_details" ("book_copy_id")
 WHERE "status" = 'BORROWED'::"BorrowingDetailStatus";
 
 -- 4. Giới hạn renewal_count chỉ được phép trong khoảng từ 0 đến 1 (mỗi cuốn chỉ được gia hạn tối đa 1 lần)
-ALTER TABLE "borrowing_details" 
-ADD CONSTRAINT chk_renewal_count_limit 
-CHECK ("renewal_count" >= 0 AND "renewal_count" <= 1);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_renewal_count_limit'
+  ) THEN
+    ALTER TABLE "borrowing_details"
+    ADD CONSTRAINT chk_renewal_count_limit
+    CHECK ("renewal_count" >= 0 AND "renewal_count" <= 1);
+  END IF;
+END $$;
 
 -- 5. Tiền phạt không được âm
-ALTER TABLE "fines" 
-ADD CONSTRAINT chk_fine_amount_non_negative 
-CHECK ("amount" >= 0);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_fine_amount_non_negative'
+  ) THEN
+    ALTER TABLE "fines"
+    ADD CONSTRAINT chk_fine_amount_non_negative
+    CHECK ("amount" >= 0);
+  END IF;
+END $$;
 
 -- 6. Khi trạng thái tiền phạt là PAID, bắt buộc phải có đủ thông tin thanh toán:
 -- - Ngày nộp (paid_at IS NOT NULL)
 -- - Người thu tiền (collected_by_id IS NOT NULL)
 -- - Mã biên lai (receipt_number IS NOT NULL và không được là chuỗi rỗng / chỉ chứa khoảng trắng)
-ALTER TABLE "fines" 
-ADD CONSTRAINT chk_fine_paid_info 
-CHECK (
-  "status" != 'PAID'::"FineStatus" OR (
-    "paid_at" IS NOT NULL AND 
-    "collected_by_id" IS NOT NULL AND
-    "receipt_number" IS NOT NULL AND 
-    length(trim("receipt_number")) > 0
-  )
-);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_fine_paid_info'
+  ) THEN
+    ALTER TABLE "fines"
+    ADD CONSTRAINT chk_fine_paid_info
+    CHECK (
+      "status" != 'PAID'::"FineStatus" OR (
+        "paid_at" IS NOT NULL AND
+        "collected_by_id" IS NOT NULL AND
+        "receipt_number" IS NOT NULL AND
+        length(trim("receipt_number")) > 0
+      )
+    );
+  END IF;
+END $$;
 
 -- 7. Khi trạng thái tiền phạt là WAIVED (miễn giảm), bắt buộc phải có lý do miễn giảm
 -- và lý do không được là chuỗi rỗng hoặc chỉ chứa khoảng trắng
-ALTER TABLE "fines" 
-ADD CONSTRAINT chk_fine_waived_reason 
-CHECK (
-  "status" != 'WAIVED'::"FineStatus" OR (
-    "waiver_reason" IS NOT NULL AND 
-    length(trim("waiver_reason")) > 0
-  )
-);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_fine_waived_reason'
+  ) THEN
+    ALTER TABLE "fines"
+    ADD CONSTRAINT chk_fine_waived_reason
+    CHECK (
+      "status" != 'WAIVED'::"FineStatus" OR (
+        "waiver_reason" IS NOT NULL AND
+        length(trim("waiver_reason")) > 0
+      )
+    );
+  END IF;
+END $$;

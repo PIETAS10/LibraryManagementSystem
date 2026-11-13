@@ -27,6 +27,7 @@ Hệ thống quản lý thư viện được xây dựng nhằm hỗ trợ quả
 - Quản lý hoạt động mượn và trả sách.
 - Theo dõi lịch sử mượn sách.
 - Quản lý tiền phạt.
+- Thông báo đăng ký độc giả mới, kết quả duyệt tài khoản và tiền phạt; có thể đánh dấu đã đọc.
 - Thống kê và báo cáo.
 - Cài đặt giao diện sáng và tối.
 
@@ -62,6 +63,27 @@ Trước khi chạy dự án, cần cài đặt:
 - PostgreSQL.
 - Git (nếu tải dự án bằng Git).
 
+## Chạy nhanh trên máy local (không dùng Docker)
+
+1. Cài Node.js 18+ và PostgreSQL, sau đó khởi động PostgreSQL.
+2. Tạo database `library_db` trong PostgreSQL (ví dụ qua pgAdmin).
+3. Clone dự án và mở terminal tại thư mục gốc:
+
+   ```bash
+   npm run setup:local
+   ```
+
+4. Khi được hỏi, nhập `DATABASE_URL` của PostgreSQL trên máy. Nếu người dùng PostgreSQL/mật khẩu khác mặc định, hãy nhập đầy đủ URL kết nối. Có thể đổi mật khẩu Admin demo ngay tại bước thiết lập.
+5. Khởi động frontend và backend cùng lúc:
+
+   ```bash
+   npm run dev
+   ```
+
+Mở http://localhost:5173. API kiểm tra trạng thái tại http://localhost:5000/api/health. Lệnh thiết lập cài dependencies, tạo `backend/.env` với JWT secrets riêng, chạy Prisma migrations, áp dụng ràng buộc bổ sung và tạo dữ liệu mẫu khi thiết lập lần đầu. File `.env` không được commit.
+
+Nếu cần thiết lập lại database hoặc tạo lại dữ liệu mẫu, có thể chạy lệnh Prisma tương ứng trong mục hướng dẫn thủ công bên dưới. Seed có thể cập nhật một số dữ liệu mẫu.
+
 ## 5. Tải dự án
 
 Clone repository:
@@ -86,7 +108,7 @@ Mở PostgreSQL hoặc pgAdmin và tạo database có tên:
 library_db
 ```
 
-### Bước 2: Cấu hình Backend
+### Bước 2: Cấu hình Backend (thiết lập thủ công)
 
 Vào thư mục `backend`, sao chép file `.env.example` thành `.env`.
 
@@ -142,7 +164,7 @@ Sao chép file `.env.example` thành `.env`.
 Kiểm tra cấu hình API:
 
 ```env
-VITE_API_BASE_URL=http://localhost:5000/api/v1
+VITE_API_URL=http://localhost:5000/api
 ```
 
 Cài đặt thư viện:

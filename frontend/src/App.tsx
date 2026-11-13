@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import ActiveBorrowingsPage from "./pages/ActiveBorrowingsPage";
 import ReaderBorrowingHistoryPage from "./pages/ReaderBorrowingHistoryPage";
 import ReaderCatalogPage from "./pages/ReaderCatalogPage";
 import ReaderBorrowedBooksPage from "./pages/ReaderBorrowedBooksPage";
+import ReaderFinesPage from "./pages/ReaderFinesPage";
 import CirculationPage from "./pages/Circulation/CirculationPage";
 import BooksPage from "./pages/Books/BooksPage";
 import BookCopiesPage from "./pages/BookCopies/BookCopiesPage";
@@ -20,10 +21,17 @@ import EmployeesPage from "./pages/Employees/EmployeesPage";
 import ReportsPage from "./pages/Reports/ReportsPage";
 import SettingsPage from "./pages/Settings/SettingsPage";
 import { useAuth } from "./context/AuthContext";
+import {
+  getNotificationsApi,
+  markAllNotificationsReadApi,
+  markNotificationReadApi,
+} from "./services/notification.service";
+import type { NotificationItem } from "./services/notification.service";
 
 import "./App.css";
 
 type Role = "ADMIN" | "LIBRARIAN" | "READER";
+type DashboardAction = "createBook" | "createReader";
 
 interface MenuItem {
   icon: string;
@@ -51,6 +59,7 @@ const menuGroups: MenuGroup[] = [
       { icon: "bi bi-search", label: "Tra cứu sách" },
       { icon: "bi bi-book-half", label: "Sách đang mượn" },
       { icon: "bi bi-clock-history", label: "Lịch sử mượn trả" },
+      { icon: "bi bi-cash-coin", label: "Khoản phạt" },
     ],
   },
   {
@@ -89,10 +98,17 @@ const menuGroups: MenuGroup[] = [
 ];
 
 const App: React.FC = () => {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, accessToken } = useAuth();
 
   const [activePage, setActivePage] = useState("Tổng quan");
+  const [dashboardAction, setDashboardAction] =
+    useState<DashboardAction | null>(null);
   const [authScreen, setAuthScreen] = useState<"login" | "register">("login");
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notificationError, setNotificationError] = useState("");
+  const notificationRef = useRef<HTMLDivElement>(null);
 
   // Đọc chế độ giao diện đã lưu trước đó.
   const [darkMode, setDarkMode] = useState(() => {
@@ -110,6 +126,110 @@ const App: React.FC = () => {
   // Bật hoặc tắt chế độ tối.
   const toggleDarkMode = () => {
     setDarkMode((previous) => !previous);
+  };
+
+  const loadNotifications = useCallback(async () => {
+    if (!accessToken) return;
+
+    try {
+      const result = await getNotificationsApi(accessToken);
+      setNotifications(result.notifications);
+      setUnreadCount(result.unreadCount);
+      setNotificationError("");
+    } catch (error) {
+      console.error("Không thể tải thông báo:", error);
+      setNotificationError(
+        error instanceof Error ? error.message : "Không thể tải thông báo",
+      );
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
+    void loadNotifications();
+    const intervalId = window.setInterval(() => {
+      void loadNotifications();
+    }, 30000);
+
+    return () => window.clearInterval(intervalId);
+  }, [accessToken, loadNotifications]);
+
+  useEffect(() => {
+    if (!notificationOpen) return;
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (
+        notificationRef.current &&
+        !notificationRef.current.contains(event.target as Node)
+      ) {
+        setNotificationOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [notificationOpen]);
+
+  const markAllAsRead = async () => {
+    if (!accessToken) return;
+
+    try {
+      await markAllNotificationsReadApi(accessToken);
+      setNotifications((current) =>
+        current.map((notification) => ({ ...notification, is_read: true })),
+      );
+      setUnreadCount(0);
+      setNotificationError("");
+    } catch (error) {
+      console.error("Không thể đánh dấu thông báo đã đọc:", error);
+      setNotificationError(
+        error instanceof Error ? error.message : "Không thể cập nhật thông báo",
+      );
+    }
+  };
+
+  const openNotification = async (notification: NotificationItem) => {
+    if (!accessToken) return;
+
+    try {
+      if (!notification.is_read) {
+        await markNotificationReadApi(accessToken, notification.id);
+        setNotifications((current) =>
+          current.map((item) =>
+            item.id === notification.id ? { ...item, is_read: true } : item,
+          ),
+        );
+        setUnreadCount((count) => Math.max(0, count - 1));
+      }
+
+      const pageByLink: Record<string, string> = {
+        "/readers": "Độc giả",
+        "/fines": "Quản lý tiền phạt",
+        "/my-borrowed-books": "Sách đang mượn",
+      };
+      const targetPage =
+        notification.link_url === "/fines" && isReaderOnly
+          ? "Khoản phạt"
+          : notification.link_url
+            ? pageByLink[notification.link_url]
+            : undefined;
+
+      if (targetPage && allowedPages.includes(targetPage)) {
+        setActivePage(targetPage);
+      }
+      setNotificationOpen(false);
+      setNotificationError("");
+    } catch (error) {
+      console.error("Không thể mở thông báo:", error);
+      setNotificationError(
+        error instanceof Error ? error.message : "Không thể cập nhật thông báo",
+      );
+    }
   };
 
   const userRoles: string[] = user?.roles ?? [];
@@ -130,6 +250,17 @@ const App: React.FC = () => {
   const allowedPages = visibleMenuGroups.flatMap((group) =>
     group.items.map((item) => item.label)
   );
+
+  const handleDashboardNavigate = (
+    page: string,
+    action?: DashboardAction,
+  ) => {
+    if (!allowedPages.includes(page)) return;
+    setDashboardAction(action ?? null);
+    setActivePage(page);
+  };
+
+  const clearDashboardAction = () => setDashboardAction(null);
 
   useEffect(() => {
     if (user && !allowedPages.includes(activePage)) {
@@ -168,7 +299,11 @@ const App: React.FC = () => {
 
   const renderPage = () => {
     if (!allowedPages.includes(activePage)) {
-      return isReaderOnly ? <ReaderDashboard /> : <Dashboard />;
+      return isReaderOnly ? (
+        <ReaderDashboard />
+      ) : (
+        <Dashboard onNavigate={handleDashboardNavigate} />
+      );
     }
 
     if (isReaderOnly) {
@@ -185,6 +320,9 @@ const App: React.FC = () => {
         case "Lịch sử mượn trả":
           return <ReaderBorrowingHistoryPage />;
 
+        case "Khoản phạt":
+          return <ReaderFinesPage />;
+
         default:
           return <ReaderDashboard />;
       }
@@ -192,10 +330,15 @@ const App: React.FC = () => {
 
     switch (activePage) {
       case "Tổng quan":
-        return <Dashboard />;
+        return <Dashboard onNavigate={handleDashboardNavigate} />;
 
       case "Quản lý sách":
-        return <BooksPage />;
+        return (
+          <BooksPage
+            openCreateOnMount={dashboardAction === "createBook"}
+            onCreateOpened={clearDashboardAction}
+          />
+        );
 
       case "Quản lý bản sách":
         return <BookCopiesPage />;
@@ -210,7 +353,12 @@ const App: React.FC = () => {
         return <PublishersPage />;
 
       case "Độc giả":
-        return <ReadersPage />;
+        return (
+          <ReadersPage
+            openCreateOnMount={dashboardAction === "createReader"}
+            onCreateOpened={clearDashboardAction}
+          />
+        );
 
       case "Nhân viên":
         return <EmployeesPage />;
@@ -296,14 +444,86 @@ const App: React.FC = () => {
           </div>
 
           <div className="topbar-right">
-            <button
-              className="header-icon"
-              type="button"
-              aria-label="Thông báo"
-            >
-              <i className="bi bi-bell"></i>
-              <span className="notification-dot"></span>
-            </button>
+            <div className="notification-menu" ref={notificationRef}>
+              <button
+                className="header-icon"
+                type="button"
+                aria-label={`Thông báo${unreadCount ? `, ${unreadCount} chưa đọc` : ""}`}
+                aria-expanded={notificationOpen}
+                onClick={() => setNotificationOpen((open) => !open)}
+              >
+                <i className="bi bi-bell"></i>
+                {unreadCount > 0 && (
+                  <span className="notification-badge">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notificationOpen && (
+                <section
+                  className="notification-dropdown"
+                  aria-label="Danh sách thông báo"
+                >
+                  <div className="notification-heading">
+                    <strong>Thông báo</strong>
+                    <button
+                      type="button"
+                      className="notification-mark-all"
+                      disabled={unreadCount === 0}
+                      onClick={() => void markAllAsRead()}
+                    >
+                      Đánh dấu đã đọc
+                    </button>
+                  </div>
+
+                  {notificationError && (
+                    <p className="notification-state notification-error" role="alert">
+                      {notificationError}
+                    </p>
+                  )}
+
+                  {notifications.length === 0 ? (
+                    <p className="notification-state">
+                      Chưa có thông báo nào.
+                    </p>
+                  ) : (
+                    <div className="notification-list">
+                      {notifications.map((notification) => (
+                        <button
+                          type="button"
+                          className={`notification-item ${notification.is_read ? "" : "unread"}`}
+                          key={notification.id}
+                          onClick={() => void openNotification(notification)}
+                        >
+                          <span className="notification-item-icon">
+                            <i
+                              className={
+                                notification.type === "FINE_INCURRED"
+                                  ? "bi bi-cash-coin"
+                                  : notification.type === "ACCOUNT_APPROVED"
+                                    ? "bi bi-person-check"
+                                    : "bi bi-info-circle"
+                              }
+                            ></i>
+                          </span>
+                          <span className="notification-item-content">
+                            <strong>{notification.title}</strong>
+                            <span>{notification.message}</span>
+                            <time dateTime={notification.created_at}>
+                              {new Date(notification.created_at).toLocaleString("vi-VN")}
+                            </time>
+                          </span>
+                          {!notification.is_read && (
+                            <span className="notification-unread-dot" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+            </div>
 
             <div className="user-profile">
               <div className="avatar">

@@ -58,7 +58,15 @@ const emptyForm = {
   address: "",
 };
 
-const ReadersPage: React.FC = () => {
+interface ReadersPageProps {
+  openCreateOnMount?: boolean;
+  onCreateOpened?: () => void;
+}
+
+const ReadersPage: React.FC<ReadersPageProps> = ({
+  openCreateOnMount = false,
+  onCreateOpened,
+}) => {
   const { user, accessToken, hasPermission } = useAuth();
 
   // Chỉ ADMIN mới được phép xóa độc giả
@@ -164,6 +172,12 @@ const ReadersPage: React.FC = () => {
     setForm(emptyForm);
     setShowForm(true);
   };
+
+  useEffect(() => {
+    if (!openCreateOnMount) return;
+    openCreateForm();
+    onCreateOpened?.();
+  }, [openCreateOnMount]);
 
   // Mở form chỉnh sửa độc giả
   const openEditForm = (reader: Reader) => {

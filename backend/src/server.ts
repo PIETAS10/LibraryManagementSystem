@@ -17,6 +17,7 @@ import bookRoutes from './routes/catalog/book.routes';
 import bookCopyRoutes from './routes/catalog/book-copy.routes';
 import dashboardRoutes from './routes/dashboard/dashboard.routes';
 import reportsRoutes from './routes/reports/reports.routes';
+import notificationRoutes from './routes/notifications/notification.routes';
 
 const app = express();
 
@@ -79,6 +80,9 @@ app.use('/api/dashboard', dashboardRoutes);
 
 // Reports & Statistics Routes
 app.use('/api/reports', reportsRoutes);
+
+// Notification Routes
+app.use('/api/notifications', notificationRoutes);
 
 // Khởi chạy Server
 app.listen(PORT, () => {

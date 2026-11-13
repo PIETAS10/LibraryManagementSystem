@@ -421,6 +421,16 @@ export const returnBook = async (
             notes: `Quá hạn ${overdueDays} ngày, mức phạt ${OVERDUE_FINE_PER_DAY.toLocaleString('vi-VN')} VNĐ/ngày`,
           },
         });
+
+        await tx.notification.create({
+          data: {
+            user_id: detail.borrowing.reader_id,
+            title: 'Phát sinh tiền phạt quá hạn',
+            message: `Bạn bị phạt ${overdueFine.toLocaleString('vi-VN')} VNĐ do trả "${detail.book_copy.book.title}" quá hạn ${overdueDays} ngày.`,
+            type: 'FINE_INCURRED',
+            link_url: '/fines',
+          },
+        });
       }
 
       const remainingBorrowed = await tx.borrowingDetail.count({
